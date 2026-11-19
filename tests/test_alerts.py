@@ -637,3 +637,79 @@ def test_gitignore_protects_secrets_and_personal_data():
     gi = (ROOT / ".gitignore").read_text()
     for entry in (".env", ".streamlit/secrets.toml", "data/private/", "*.db"):
         assert entry in gi
+
+
+# ---------------------------------------------------------------- settings from env / Streamlit secrets
+class FakeSecrets(dict):
+    pass
+
+
+def test_settings_read_from_streamlit_secrets_sections(monkeypatch):
+    from phoenix_core import sms_service
+    sec = FakeSecrets(twilio=FakeSecrets(account_sid="AC" + "2" * 32, auth_token="sec-token", phone_number="+15045550000"),
+                      phoenix=FakeSecrets(admin_passcode="pw-from-secrets"))
+    monkeypatch.setattr(sms_service, "_secrets", lambda: sec)
+    p = TwilioProvider()
+    assert p.configured()[0] and p.token == "sec-token" and p.from_number == "+15045550000"
+    assert sms_service.get_setting("PHOENIX_ADMIN_PASSCODE") == "pw-from-secrets"
+    assert sms_service.setting_source("TWILIO_AUTH_TOKEN") == "Streamlit secrets"
+    assert "sec-token" not in sms_service.redact("error sec-token")          # secrets values are redacted too
+
+
+def test_settings_top_level_secrets_and_env_priority(monkeypatch):
+    from phoenix_core import sms_service
+    monkeypatch.setattr(sms_service, "_secrets", lambda: FakeSecrets(TWILIO_AUTH_TOKEN="top-level"))
+    assert sms_service.get_setting("TWILIO_AUTH_TOKEN") == "top-level"
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "from-env")
+    assert sms_service.get_setting("TWILIO_AUTH_TOKEN") == "from-env"
+    assert sms_service.setting_source("TWILIO_AUTH_TOKEN") == "environment variable"
+
+
+def test_missing_secrets_file_is_harmless(monkeypatch):
+    from phoenix_core import sms_service
+    assert sms_service.get_setting("TWILIO_AUTH_TOKEN") == ""      # no env, no secrets file in tests
+    assert sms_service.setting_source("TWILIO_AUTH_TOKEN") == "not set"
+
+
+def test_automatic_sending_still_needs_explicit_approval(store, monkeypatch):
+    from phoenix_core import sms_service
+    monkeypatch.setattr(sms_service, "_secrets", lambda: FakeSecrets())
+    assert not sms_service.automated_real_sms_allowed()
+    assert store.settings()["auto_send"] is False
+
+
+# ---------------------------------------------------------------- demonstration test messages
+def test_demonstration_message_is_clearly_not_an_alert():
+    m = alerts.build_message(alerts.demo_alert("freetown", "Kroo Town"), test=True)
+    assert m.startswith("PHOENIX DEMONSTRATION - not an official emergency alert.")
+    assert "No action is needed" in m and m.endswith("Reply STOP to opt out, HELP for help.")
+    assert "flood alert (" not in m and "Warning" not in m and len(m) <= alerts.MAX_SMS_CHARS and m.isascii()
+
+
+def test_repeat_test_send_blocked_but_failed_attempt_does_not_block(store):
+    rid = add(store)
+    failing = MockProvider(fail_numbers={"+15045550123"})
+    a1 = alerts.make_test_alert(store, "new_orleans", 1, "Mid-City", False, demonstration=True)
+    assert alerts.send_test(store, failing, a1, rid) == "failed"
+    ok = MockProvider()
+    a2 = alerts.make_test_alert(store, "new_orleans", 1, "Mid-City", False, demonstration=True)
+    assert alerts.send_test(store, ok, a2, rid) == "sent"            # failure did not block a retry
+    a3 = alerts.make_test_alert(store, "new_orleans", 1, "Mid-City", False, demonstration=True)
+    with pytest.raises(alerts.RepeatSendBlocked):
+        alerts.send_test(store, ok, a3, rid)
+    assert len(ok.outbox) == 1
+
+
+def test_test_send_refuses_sms_disabled(store):
+    rid = add(store, sms_enabled=False)
+    aid = alerts.make_test_alert(store, "new_orleans", 1, "Mid-City", False, demonstration=True)
+    with pytest.raises(ValueError):
+        alerts.send_test(store, MockProvider(), aid, rid)
+
+
+def test_demo_sends_never_counted_as_alert_deliveries(store):
+    rid = add(store)
+    aid = alerts.make_test_alert(store, "new_orleans", 1, "Mid-City", False, demonstration=True)
+    alerts.send_test(store, MockProvider(), aid, rid)
+    s = alerts.dashboard_stats(store)
+    assert s["attempted"] == 0 and s["alerts"] == 0 and s["tests"] == 1

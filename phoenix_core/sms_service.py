@@ -27,6 +27,67 @@ OPTED_OUT_CODE = "21610"        # recipient replied STOP: Twilio blocks further 
 INVALID_NUMBER_CODES = {"21211", "21614", "21217"}
 
 
+# ---------------------------------------------------------------- settings: environment, then Streamlit secrets
+_SECTIONS = ("twilio", "phoenix", "sms")
+
+
+def _secrets():
+    """Streamlit secrets if a secrets file / Cloud secrets exist; None otherwise (never raises)."""
+    try:
+        import streamlit as st
+        sec = st.secrets
+        sec.keys()           # forces loading; raises if no secrets are configured
+        return sec
+    except Exception:
+        return None
+
+
+def _from_secrets(name: str):
+    sec = _secrets()
+    if sec is None:
+        return None
+    short = name.lower().split("_", 1)[1] if "_" in name else name.lower()   # TWILIO_AUTH_TOKEN -> auth_token
+    try:
+        for key in (name, name.lower()):
+            if key in sec and not hasattr(sec[key], "keys"):
+                return str(sec[key])
+        for section in _SECTIONS:
+            if section in sec and hasattr(sec[section], "keys"):
+                block = sec[section]
+                for key in (name, name.lower(), short, short.upper()):
+                    if key in block:
+                        return str(block[key])
+    except Exception:
+        return None
+    return None
+
+
+def get_setting(name: str, default: str = "") -> str:
+    """Read a server-side setting: environment variable first, then Streamlit secrets.
+
+    Streamlit secrets may be top level (TWILIO_AUTH_TOKEN = "...") or in a section, e.g.
+        [twilio]
+        account_sid = "AC..."
+        auth_token = "..."
+        phone_number = "+1..."
+    Values are never logged or displayed.
+    """
+    v = os.environ.get(name)
+    if v is not None and v.strip():
+        return v.strip()
+    v = _from_secrets(name)
+    return v.strip() if v and v.strip() else default
+
+
+def setting_source(name: str) -> str:
+    """Where a setting comes from (for the admin Setup page) - never the value."""
+    if os.environ.get(name, "").strip():
+        return "environment variable"
+    if (_from_secrets(name) or "").strip():
+        return "Streamlit secrets"
+    return "not set"
+
+
 _PHONE_RE = re.compile(r"\+?\d[\d\s\-\(\)\.]{6,}\d")
 _SID_RE = re.compile(r"\b(AC|SK|MG|PN)[0-9a-fA-F]{32}\b")
 
@@ -41,7 +102,7 @@ def redact(text) -> str:
         return ""
     t = str(text)
     for k in ("TWILIO_AUTH_TOKEN", "TWILIO_ACCOUNT_SID"):
-        v = os.environ.get(k, "").strip()
+        v = get_setting(k)
         if len(v) >= 6:
             t = t.replace(v, "[redacted]")
     t = _SID_RE.sub(lambda m: m.group(1) + "…[redacted]", t)
@@ -120,10 +181,10 @@ class TwilioProvider:
     API = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages"
 
     def __init__(self, sid=None, token=None, from_number=None, messaging_service_sid=None, timeout=20):
-        self.sid = (sid or os.environ.get("TWILIO_ACCOUNT_SID", "")).strip()
-        self.token = (token or os.environ.get("TWILIO_AUTH_TOKEN", "")).strip()
-        self.from_number = (from_number or os.environ.get("TWILIO_PHONE_NUMBER", "")).strip()
-        self.messaging_service_sid = (messaging_service_sid or os.environ.get("TWILIO_MESSAGING_SERVICE_SID", "")).strip()
+        self.sid = (sid or get_setting("TWILIO_ACCOUNT_SID")).strip()
+        self.token = (token or get_setting("TWILIO_AUTH_TOKEN")).strip()
+        self.from_number = (from_number or get_setting("TWILIO_PHONE_NUMBER")).strip()
+        self.messaging_service_sid = (messaging_service_sid or get_setting("TWILIO_MESSAGING_SERVICE_SID")).strip()
         self.timeout = timeout
 
     def missing_settings(self) -> list[str]:
@@ -216,4 +277,4 @@ def get_provider():
 
 def automated_real_sms_allowed() -> bool:
     """Automatic (monitor-driven) sending through a REAL provider needs a second, explicit switch."""
-    return os.environ.get("PHOENIX_ALLOW_AUTOMATED_SMS", "").strip() == "1"
+    return get_setting("PHOENIX_ALLOW_AUTOMATED_SMS") == "1"

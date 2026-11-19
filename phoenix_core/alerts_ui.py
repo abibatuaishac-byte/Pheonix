@@ -25,10 +25,10 @@ from . import alert_monitor, alerts, data, maps, theme
 from . import recipient_manager as rm
 from .alert_store import AlertStore, db_path, parse_ts, ROOT
 from .cities import CITIES
-from .sms_service import automated_real_sms_allowed, explain_error, get_provider, redact
+from .sms_service import automated_real_sms_allowed, explain_error, get_provider, get_setting, redact, setting_source
 
 LEVEL_OPTS = list(rm.LEVELS)
-STATUS_LABEL = {"queued": "Accepted by Twilio", "accepted": "Accepted by Twilio", "sent": "Sent to carrier",
+STATUS_LABEL = {"queued": "Accepted by Twilio (queued)", "accepted": "Accepted by Twilio", "sent": "Sent to carrier",
                 "delivered": "Delivered (confirmed)", "failed": "Failed", "undelivered": "Undelivered",
                 "skipped": "Not sent (rule)"}
 SKIP_LABEL = {"no_consent": "no consent", "opted_out": "opted out", "sms_disabled": "SMS disabled",
@@ -82,7 +82,7 @@ def _login_guard() -> dict:
 
 def _gate() -> bool:
     """Administrator login. Mandatory: without PHOENIX_ADMIN_PASSCODE the admin tools stay disabled."""
-    code = os.environ.get("PHOENIX_ADMIN_PASSCODE", "")
+    code = get_setting("PHOENIX_ADMIN_PASSCODE")
     if not code:
         st.info("Administrator access has not been set up on this server, so recipient management and SMS tools "
                 "are unavailable. See *Administrator setup* in the project README.")
@@ -457,51 +457,72 @@ def tab_history(store, slug):
                  width="stretch", hide_index=True)
 
 
+DEMO_STYLE = "PHOENIX demonstration message (recommended for live demos)"
+STYLES = [DEMO_STYLE, "Sample official warning (as relayed from NWS)", "Sample PHOENIX forecast notice"]
+
+
 def tab_test(store, provider, slug):
-    st.markdown(theme.note("<b>Test mode.</b> Messages created here start with <b>TEST ONLY - NOT A REAL ALERT</b>, "
-                           "are never sent to groups, and a test SMS goes to <b>one</b> chosen person only after you "
-                           "confirm."), unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
+    st.markdown(theme.note(
+        "<b>Send Test SMS.</b> One message to <b>one</b> person who has agreed to receive it, only after you approve "
+        f"it. Test messages are never sent to groups, and the same person cannot receive another test within "
+        f"{alerts.TEST_RESEND_MINUTES} minutes."), unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
     city = c1.selectbox("City", list(CITIES), index=list(CITIES).index(slug), format_func=lambda s: CITIES[s].name,
                         key="t_city")
-    lvl = c2.selectbox("Alert category", LEVEL_OPTS, index=2, format_func=lambda l: rm.LEVELS[l], key="t_lvl")
-    style = c3.selectbox("Message type", ["Official warning (as relayed from NWS)", "PHOENIX forecast notice"], key="t_style",
-                         index=1 if city == "freetown" else 0)
-    rs = [r for r in rm.list_recipients(store, city) if r["consent"] and not r["opted_out"]]
-    area = rs[0]["area_label"] if rs else CITIES[city].name
+    style = c2.selectbox("Message", STYLES, key="t_style")
+    lvl = 2
+    if style != DEMO_STYLE:
+        lvl = st.selectbox("Sample alert category", LEVEL_OPTS, index=2, format_func=lambda l: rm.LEVELS[l], key="t_lvl")
+    rs = [r for r in rm.list_recipients(store, city) if rm.is_active(r)]
+    area = CITIES[city].name
     pick = None
     if rs:
         pick = st.selectbox("Recipient", rs, format_func=_recipient_label, key="t_rec")
         area = pick["area_label"]
     else:
-        st.info("No consenting recipient in this city yet; you can still preview the message.")
-    sample = alerts.sample_alert(city, lvl, area, style.startswith("Official"))
+        st.info("No consenting recipient with SMS enabled in this city yet. Register one under *Registered recipients*; "
+                "you can still preview the message.")
+    sample = alerts.demo_alert(city, area) if style == DEMO_STYLE else \
+        alerts.sample_alert(city, lvl, area, style.startswith("Sample official"))
     msg = alerts.build_message(sample, test=True)
-    st.markdown("**Exact message preview**")
+    st.markdown("**Exact message the person will receive**")
     st.code(msg, language=None)
-    st.caption(f"{len(msg)} characters (max {alerts.MAX_SMS_CHARS}, 2 SMS segments).")
-    if pick and not provider.configured()[0]:
+    st.caption(f"{len(msg)} characters. Sender: {provider.sender_masked or 'not configured'}.")
+    if not pick:
+        return
+    if not provider.configured()[0]:
         st.caption("Sending is unavailable until Twilio is connected. The preview above is the exact text.")
-    elif pick:
-        with st.form("test_send"):
-            ok = st.checkbox(f"Send ONE real test SMS to {rm.mask_phone(pick['phone'])} ({pick['name']}), who has "
-                             "agreed to receive messages")
-            typed = st.text_input("Type TEST to confirm")
-            if st.form_submit_button("Generate sample and send test SMS"):
-                if not ok or typed.strip() != "TEST":
-                    st.error("Not sent: confirmation missing.")
-                else:
-                    aid = alerts.make_test_alert(store, city, lvl, area, style.startswith("Official"))
-                    try:
-                        res = alerts.send_test(store, provider, aid, pick["id"])
-                        if res == "sent":
-                            st.success("Test SMS accepted by Twilio. Delivery is confirmed only after Twilio reports it "
-                                       "(Alert dashboard > Refresh delivery status).")
-                        else:
-                            d = store.one("SELECT error_code FROM deliveries WHERE is_test=1 ORDER BY id DESC LIMIT 1")
-                            st.error("Twilio did not accept the test SMS: " + explain_error(d and d["error_code"]))
-                    except (ValueError, alerts.ProviderNotConfigured) as e:
-                        st.error(redact(e))
+        return
+    last = alerts.last_test_send(store, pick["id"])
+    if last:
+        st.caption(f"Last test to this person: {fmt_time(last['created_at'])} - "
+                   f"{STATUS_LABEL.get(last['status'], last['status'])}.")
+    with st.form("test_send", clear_on_submit=True):   # confirmation resets after every attempt
+        ok = st.checkbox(f"I approve sending ONE real SMS to {rm.mask_phone(pick['phone'])} ({pick['name']}), who has "
+                         "agreed to receive a test message")
+        typed = st.text_input("Type TEST to confirm")
+        if st.form_submit_button("Send Test SMS", type="primary"):
+            if not ok or typed.strip() != "TEST":
+                st.error("Not sent: tick the approval box and type TEST.")
+            else:
+                try:
+                    last = alerts.last_test_send(store, pick["id"])   # re-check right before sending
+                    aid = alerts.make_test_alert(store, city, lvl, area, style.startswith("Sample official"),
+                                                 demonstration=(style == DEMO_STYLE))
+                    res = alerts.send_test(store, provider, aid, pick["id"])
+                    d = store.one("SELECT status, error_code FROM deliveries WHERE is_test=1 AND recipient_id=? "
+                                  "ORDER BY id DESC LIMIT 1", (pick["id"],))
+                    if res == "sent":
+                        st.success(f"Accepted by Twilio (status: {STATUS_LABEL.get(d['status'], d['status'])}). "
+                                   "Delivery is confirmed only after Twilio reports it: use *Refresh delivery "
+                                   "status* on the Alert dashboard.")
+                    else:
+                        st.error("Failed: Twilio did not accept the message - " +
+                                 (explain_error(d["error_code"]) or "unknown error") + ".")
+                except alerts.RepeatSendBlocked as e:
+                    st.warning(str(e))
+                except (ValueError, alerts.ProviderNotConfigured) as e:
+                    st.error(redact(e))
 
 
 def tab_settings(store, provider):
@@ -561,8 +582,16 @@ def tab_setup(store, provider):
         st.code('$env:TWILIO_ACCOUNT_SID="AC..."\n$env:TWILIO_AUTH_TOKEN="..."\n$env:TWILIO_PHONE_NUMBER="+1..."\n'
                 '# optional, e.g. for US A2P 10DLC:\n$env:TWILIO_MESSAGING_SERVICE_SID="MG..."\n'
                 'streamlit run app.py', language="powershell")
+        st.markdown("**On Streamlit Community Cloud** add them under *App settings > Secrets* instead "
+                    "(never in a file committed to Git):")
+        st.code('[twilio]\naccount_sid = "AC..."\nauth_token = "..."\nphone_number = "+1..."\n\n'
+                '[phoenix]\nadmin_passcode = "choose-a-strong-passcode"', language="toml")
         st.markdown(("**Missing on this server:** " + ", ".join(f"`{m}`" for m in missing)) if missing else
                     "All required Twilio settings are present.")
+        st.dataframe(pd.DataFrame([{"Setting": n, "Read from": setting_source(n)} for n in (
+            "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER", "TWILIO_MESSAGING_SERVICE_SID",
+            "PHOENIX_ADMIN_PASSCODE", "PHOENIX_ALLOW_AUTOMATED_SMS")]), width="stretch", hide_index=True)
+        st.caption("Values are never displayed. Environment variables take priority over Streamlit secrets.")
         st.markdown("- US numbers need A2P 10DLC registration (or a verified toll-free number).\n"
                     "- Check Twilio availability and sender-ID rules for Sierra Leone (+232).\n"
                     "- Trial accounts deliver only to verified numbers and add a trial prefix.\n"

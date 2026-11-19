@@ -87,7 +87,8 @@ def test_duplicate_osm_facilities_are_merged():
 
 
 def test_no_raw_json_dumps_in_app():
-    src = (ROOT / "app.py").read_text() + (ROOT / "phoenix_core" / "alerts_ui.py").read_text()
+    src = (ROOT / "app.py").read_text(encoding="utf-8") + \
+        (ROOT / "phoenix_core" / "alerts_ui.py").read_text(encoding="utf-8")
     assert "st.json(" not in src
 
 

@@ -33,7 +33,7 @@ from .alert_store import AlertStore, parse_ts, utcnow
 from .cities import CITIES
 from .geo import LocalProjection
 from .recipient_manager import LEVELS, is_active, mask_phone
-from .sms_service import automated_real_sms_allowed, redact
+from .sms_service import automated_real_sms_allowed, get_setting, redact
 
 # ---------------------------------------------------------------- NWS classification
 CRITICAL_EVENTS = {"Storm Surge Warning", "Flash Flood Emergency"}
@@ -180,8 +180,16 @@ def gsm_safe(s: str) -> str:
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
 
 
+DEMO_SOURCE_TYPE = "demonstration"
+TEST_RESEND_MINUTES = 10   # a second test to the same person within this time is refused
+
+
 def build_message(alert: dict, test: bool = False) -> str:
     city = CITIES[alert["city"]].name if alert["city"] in CITIES else alert["city"]
+    if alert["source_type"] == DEMO_SOURCE_TYPE:
+        # Fixed, self-explanatory text: clearly a demonstration, never an emergency alert.
+        return gsm_safe(f"PHOENIX DEMONSTRATION - not an official emergency alert. This is a test message from the "
+                        f"PHOENIX flood information prototype ({city}). No action is needed." + TAIL)
     prec = PRECAUTIONS_SMS[alert["level"]]
     pre = TEST_PREFIX if test else ""
     if alert["source_type"] == "official_warning":
@@ -476,10 +484,32 @@ def sample_alert(city: str, level: int, area_label: str, official_style: bool) -
             "explanation": f"Administrator-generated test notification for {name}. Not based on any real warning."}
 
 
-def make_test_alert(store: AlertStore, city: str, level: int, area_label: str, official_style: bool) -> int:
+def demo_alert(city: str, area_label: str) -> dict:
+    """The recommended message for live demonstrations: says plainly it is a demonstration, not an alert."""
+    return {"city": city, "area_label": area_label, "level": 1, "category": LEVELS[1],
+            "source": "TEST - PHOENIX demonstration message", "source_type": DEMO_SOURCE_TYPE,
+            "event_key": f"test:demo:{city}:{utcnow()}", "headline": "PHOENIX demonstration message",
+            "precautions": "None - demonstration only.", "is_test": 1,
+            "explanation": "Administrator-sent demonstration message. Not based on any warning or forecast."}
+
+
+def make_test_alert(store: AlertStore, city: str, level: int, area_label: str, official_style: bool,
+                    demonstration: bool = False) -> int:
     """Store a sample alert for test mode. Test alerts are never dispatched to groups."""
-    aid, _ = upsert_alert(store, sample_alert(city, level, area_label, official_style), {})
+    a = demo_alert(city, area_label) if demonstration else sample_alert(city, level, area_label, official_style)
+    aid, _ = upsert_alert(store, a, {})
     return aid
+
+
+class RepeatSendBlocked(ValueError):
+    pass
+
+
+def last_test_send(store: AlertStore, recipient_id: int) -> dict | None:
+    """Most recent test message accepted for this person (failed attempts do not count)."""
+    ph = ",".join("?" * len(SUCCESS_STATES))
+    return store.one(f"SELECT * FROM deliveries WHERE recipient_id=? AND is_test=1 AND status IN ({ph}) "
+                     "ORDER BY id DESC LIMIT 1", (recipient_id, *SUCCESS_STATES))
 
 
 def send_test(store: AlertStore, provider, alert_id: int, recipient_id: int) -> str:
@@ -491,6 +521,15 @@ def send_test(store: AlertStore, provider, alert_id: int, recipient_id: int) -> 
         raise ValueError("Test sends must use a test alert.")
     if r is None or not r["consent"] or r["opted_out"]:
         raise ValueError("Test messages can only go to a registered person with consent who has not opted out.")
+    if not r["sms_enabled"]:
+        raise ValueError("SMS is turned off for this person.")
+    last = last_test_send(store, recipient_id)
+    if last:
+        mins = (datetime.now(timezone.utc) - parse_ts(last["created_at"])).total_seconds() / 60
+        if mins < TEST_RESEND_MINUTES:
+            raise RepeatSendBlocked(f"A test message was already sent to this person {mins:.0f} minute(s) ago. "
+                                    f"To prevent repeated messages, wait {TEST_RESEND_MINUTES - mins:.0f} more "
+                                    "minute(s) before sending another.")
     return _send_one(store, provider, a, r, test=True)
 
 
@@ -577,7 +616,7 @@ def capability_status(store: AlertStore, provider, monitors: list[dict], public:
     """
     st = store.settings()
     rows = []
-    admin = bool(os.environ.get("PHOENIX_ADMIN_PASSCODE"))
+    admin = bool(get_setting("PHOENIX_ADMIN_PASSCODE"))
     rows.append({"Capability": "Administrator authentication",
                  "Status": "Enabled" if admin else "Not set up - admin tools disabled",
                  "Evidence / dependency": "Administrator passcode configured on the server." if admin else

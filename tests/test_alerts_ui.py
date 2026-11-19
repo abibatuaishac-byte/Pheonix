@@ -141,3 +141,50 @@ def test_other_sections_remain_public():
         at.session_state["section"] = sec
         at.run()
         assert not at.exception and "Administrator" not in text(at)
+
+
+def test_send_test_sms_flow_with_faked_twilio(monkeypatch):
+    """Full on-screen flow; Twilio HTTP is faked, so nothing is sent."""
+    import requests
+
+    class R:
+        def __init__(self, code, p):
+            self.status_code, self._p, self.content, self.text = code, p, b"x", ""
+
+        def json(self):
+            return self._p
+    posts = []
+    monkeypatch.setattr(requests, "post", lambda url, auth, timeout, data: posts.append(data) or
+                        R(201, {"sid": "SM1", "status": "queued"}))
+    monkeypatch.setattr(requests, "get", lambda url, **k: R(200, {"status": "active", "type": "Full",
+                                                                  "incoming_phone_numbers": [{"capabilities": {"sms": True}}]}))
+    monkeypatch.setenv("PHOENIX_ADMIN_PASSCODE", "pw")
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC" + "3" * 32)
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "tok-xyz-123")
+    monkeypatch.setenv("TWILIO_PHONE_NUMBER", "+15045550000")
+    from phoenix_core import recipient_manager as rm
+    from phoenix_core.alerts_ui import get_store
+    st.cache_resource.clear()
+    rm.register(get_store(), rm.RecipientInput("Demo Volunteer", "+15045550177", "new_orleans", "Mid-City", "point",
+                                               29.95, -90.07, 1, True, True, rm.CONSENT_METHODS[0]))
+    at = app()
+    at.text_input[0].set_value("pw")
+    next(b for b in at.button if b.label == "Sign in").click()
+    at.run()
+    send = lambda: next(b for b in at.button if b.label == "Send Test SMS")  # noqa: E731
+    send().click(); at.run()                                   # no approval -> refused
+    assert posts == [] and "Not sent" in text(at)
+    next(c for c in at.checkbox if c.label.startswith("I approve sending ONE")).check()
+    next(t for t in at.text_input if t.label == "Type TEST to confirm").set_value("TEST")
+    send().click(); at.run()
+    assert len(posts) == 1 and posts[0]["To"] == "+15045550177"
+    assert posts[0]["Body"].startswith("PHOENIX DEMONSTRATION - not an official emergency alert.")
+    assert "Accepted by Twilio" in " ".join(x.value for x in at.success)
+    # second approved attempt within the block window is refused
+    next(c for c in at.checkbox if c.label.startswith("I approve sending ONE")).check()
+    next(t for t in at.text_input if t.label == "Type TEST to confirm").set_value("TEST")
+    send().click(); at.run()
+    assert len(posts) == 1 and "already sent to this person" in text(at)
+    page = text(at) + " ".join(df.value.to_string() for df in at.dataframe)
+    for secret in ("tok-xyz-123", "3333333333", "5045550177", "5045550000"):
+        assert secret not in page
