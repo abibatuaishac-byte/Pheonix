@@ -1,0 +1,22 @@
+# PHOENIX - never commit secrets or personal data
+.env
+*.env
+.streamlit/secrets.toml
+data/private/
+backups/
+*.db
+*.db-wal
+*.db-shm
+
+# Python / tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local backup files
+app_backup*.py
+
+.pytest_cache/
+
+.pytest_cache/

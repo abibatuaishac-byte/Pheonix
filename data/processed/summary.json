@@ -1,0 +1,66 @@
+{
+  "source": {
+    "dataset": "Freetown, Sierra Leone Flood Risk Assessment",
+    "publisher": "World Bank Data Catalog (hazard modelling by JBA Risk Management; exposure by GEM Foundation / JBA)",
+    "url": "https://datacatalog.worldbank.org/search/dataset/0066934/freetown-sierra-leone-flood-risk-assessment",
+    "license": "CC BY 4.0 (GED4ALL provincial exposure tables: CC BY-NC-SA 4.0)",
+    "hazard_type": "Undefended combined river + surface-water flood extent (modelled)",
+    "processed_on": "2026-11-19"
+  },
+  "return_periods": {
+    "RP20": {
+      "years": 20,
+      "annual_chance_pct": 5.0,
+      "extent_km2": 19.75,
+      "buildings_in_extent": 8011,
+      "value_in_extent_usd": 421826313.0,
+      "by_occupancy": {
+        "Com": {
+          "buildings": 505,
+          "value_usd": 38972611.0
+        },
+        "Ind": {
+          "buildings": 33,
+          "value_usd": 3004096.0
+        },
+        "Res": {
+          "buildings": 7473,
+          "value_usd": 379849607.0
+        }
+      },
+      "recorded_flood_points_inside": 0,
+      "recorded_flood_points_within_100m": 2,
+      "recorded_flood_points_beyond_250m": 33,
+      "recorded_flood_points_median_distance_m": 355.0,
+      "recorded_flood_points_total": 45
+    },
+    "RP100": {
+      "years": 100,
+      "annual_chance_pct": 1.0,
+      "extent_km2": 23.95,
+      "buildings_in_extent": 12001,
+      "value_in_extent_usd": 631387332.0,
+      "by_occupancy": {
+        "Com": {
+          "buildings": 746,
+          "value_usd": 57571421.0
+        },
+        "Ind": {
+          "buildings": 43,
+          "value_usd": 3914428.0
+        },
+        "Res": {
+          "buildings": 11212,
+          "value_usd": 569901484.0
+        }
+      },
+      "recorded_flood_points_inside": 2,
+      "recorded_flood_points_within_100m": 9,
+      "recorded_flood_points_beyond_250m": 23,
+      "recorded_flood_points_median_distance_m": 252.0,
+      "recorded_flood_points_total": 45
+    }
+  },
+  "buildings_total": 153435,
+  "value_total_usd": 8076099019.8865795
+}

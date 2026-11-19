@@ -1,0 +1,58 @@
+{
+  "city": "miami",
+  "built_on": "2026-11-19",
+  "study_area": {
+    "name": "Miami city",
+    "geoid": "1245000",
+    "source": "US Census Bureau TIGERweb",
+    "retrieved": "2026-11-19"
+  },
+  "retrieved": {
+    "boundary": "2026-11-19",
+    "fema": "2026-11-19",
+    "osm": "2026-11-19"
+  },
+  "fema": {
+    "retrieved": "2026-11-19",
+    "source_service": "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0",
+    "raw_features": 676,
+    "zones": {
+      "AE": "SFHA",
+      "AH": "SFHA",
+      "VE": "SFHA",
+      "X (0.2 Percent Annual Chance Flood Hazard)": "X500"
+    },
+    "firm_panels": [
+      {
+        "DFIRM_ID": "12086C",
+        "VERSION_ID": "1.1.1.0",
+        "features": 676
+      }
+    ]
+  },
+  "facilities": {
+    "osm_timestamp": "2026-11-19 17:26:16 UTC (export time)",
+    "via": "HOT OSM Raw Data API (api-prod.raw-data.hotosm.org)",
+    "incomplete_tiles": [],
+    "count": 321,
+    "by_category": {
+      "School": 234,
+      "Clinic / health centre": 18,
+      "Police": 32,
+      "Fire station": 17,
+      "Hospital": 8,
+      "College / university": 11,
+      "Emergency assembly point": 1
+    },
+    "unnamed": 3,
+    "dropped_no_coordinates": 0,
+    "outside_study_area": 278,
+    "uncategorised": 0
+  },
+  "roads": {
+    "osm_timestamp": "2026-11-19 17:26:16 UTC (export time)",
+    "via": "HOT OSM Raw Data API (api-prod.raw-data.hotosm.org)",
+    "count": 4111,
+    "bridges": 246
+  }
+}

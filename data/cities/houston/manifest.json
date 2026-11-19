@@ -1,0 +1,70 @@
+{
+  "city": "houston",
+  "built_on": "2026-11-19",
+  "study_area": {
+    "name": "Houston city - study area",
+    "geoid": "4835000",
+    "source": "US Census Bureau TIGERweb",
+    "retrieved": "2026-11-19",
+    "clip_bbox": [
+      -95.5,
+      29.68,
+      -95.25,
+      29.84
+    ]
+  },
+  "retrieved": {
+    "boundary": "2026-11-19",
+    "fema": "2026-11-19",
+    "osm": "2026-11-19"
+  },
+  "fema": {
+    "retrieved": "2026-11-19",
+    "source_service": "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0",
+    "raw_features": 870,
+    "zones": {
+      "A": "SFHA",
+      "AE": "SFHA",
+      "AE (Floodway)": "SFHA",
+      "AO": "SFHA",
+      "X (0.2 Percent Annual Chance Flood Hazard)": "X500"
+    },
+    "firm_panels": [
+      {
+        "DFIRM_ID": "48201C",
+        "VERSION_ID": "1.1.1.0",
+        "features": 724
+      },
+      {
+        "DFIRM_ID": "48201C",
+        "VERSION_ID": "2.3.3.3",
+        "features": 146
+      }
+    ]
+  },
+  "facilities": {
+    "osm_timestamp": "2026-11-19T17:06:14Z",
+    "via": "Overpass API",
+    "incomplete_tiles": [],
+    "count": 496,
+    "by_category": {
+      "School": 223,
+      "Clinic / health centre": 148,
+      "Hospital": 28,
+      "Police": 23,
+      "Fire station": 41,
+      "College / university": 31,
+      "Emergency shelter": 2
+    },
+    "unnamed": 8,
+    "dropped_no_coordinates": 0,
+    "outside_study_area": 26,
+    "uncategorised": 0
+  },
+  "roads": {
+    "osm_timestamp": "2026-11-19 17:24:16 UTC (export time)",
+    "via": "HOT OSM Raw Data API (api-prod.raw-data.hotosm.org)",
+    "count": 10754,
+    "bridges": 924
+  }
+}

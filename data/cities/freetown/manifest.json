@@ -1,0 +1,36 @@
+{
+  "city": "freetown",
+  "built_on": "2026-11-19",
+  "study_area": {
+    "name": "Freetown City Council wards",
+    "source": "World Bank Freetown Flood Risk Assessment"
+  },
+  "retrieved": {
+    "osm": "2026-11-19"
+  },
+  "facilities": {
+    "osm_timestamp": "2026-11-19 17:25:40 UTC (export time)",
+    "via": "HOT OSM Raw Data API (api-prod.raw-data.hotosm.org)",
+    "incomplete_tiles": [],
+    "count": 399,
+    "by_category": {
+      "School": 251,
+      "Police": 42,
+      "Clinic / health centre": 40,
+      "Emergency shelter": 1,
+      "College / university": 19,
+      "Fire station": 3,
+      "Hospital": 43
+    },
+    "unnamed": 40,
+    "dropped_no_coordinates": 0,
+    "outside_study_area": 65,
+    "uncategorised": 0
+  },
+  "roads": {
+    "osm_timestamp": "2026-11-19 17:23:40 UTC (export time)",
+    "via": "HOT OSM Raw Data API (api-prod.raw-data.hotosm.org)",
+    "count": 245,
+    "bridges": 32
+  }
+}

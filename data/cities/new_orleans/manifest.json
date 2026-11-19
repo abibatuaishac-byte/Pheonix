@@ -1,0 +1,57 @@
+{
+  "city": "new_orleans",
+  "built_on": "2026-11-19",
+  "study_area": {
+    "name": "New Orleans city",
+    "geoid": "2255000",
+    "source": "US Census Bureau TIGERweb",
+    "retrieved": "2026-11-19"
+  },
+  "retrieved": {
+    "boundary": "2026-11-19",
+    "osm": "2026-11-19",
+    "fema": "2026-11-19"
+  },
+  "facilities": {
+    "osm_timestamp": "2026-11-19 17:24:39 UTC (export time)",
+    "via": "HOT OSM Raw Data API (api-prod.raw-data.hotosm.org)",
+    "incomplete_tiles": [],
+    "count": 329,
+    "by_category": {
+      "School": 233,
+      "Police": 16,
+      "Hospital": 10,
+      "Clinic / health centre": 20,
+      "Fire station": 34,
+      "College / university": 16
+    },
+    "unnamed": 12,
+    "dropped_no_coordinates": 0,
+    "outside_study_area": 120,
+    "uncategorised": 0
+  },
+  "roads": {
+    "osm_timestamp": "2026-11-19 17:25:21 UTC (export time)",
+    "via": "HOT OSM Raw Data API (api-prod.raw-data.hotosm.org)",
+    "count": 1708,
+    "bridges": 251
+  },
+  "fema": {
+    "retrieved": "2026-11-19",
+    "source_service": "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0",
+    "raw_features": 10905,
+    "zones": {
+      "X (Area With Reduced Flood Risk Due To Levee)": "LEVEE",
+      "AE": "SFHA",
+      "VE": "SFHA",
+      "X (0.2 Percent Annual Chance Flood Hazard)": "X500"
+    },
+    "firm_panels": [
+      {
+        "DFIRM_ID": "22071C",
+        "VERSION_ID": "1.1.1.0",
+        "features": 10905
+      }
+    ]
+  }
+}
