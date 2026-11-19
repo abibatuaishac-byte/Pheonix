@@ -192,3 +192,10 @@ def test_sfha_inside_500yr_for_us_cities():
         a = data.hazard_geometry(c.available_scenarios[0])
         b = data.hazard_geometry(c.available_scenarios[1])
         assert a.difference(b).area / a.area < 0.001, slug
+
+
+def test_streamlit_file_watcher_disabled_for_deployment():
+    """Regression guard for the Streamlit Cloud crash: the source watcher must stay off (see config.toml)."""
+    import tomllib
+    cfg = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
+    assert cfg["server"]["fileWatcherType"] == "none"

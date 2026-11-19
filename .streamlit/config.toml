@@ -9,6 +9,11 @@ font = "sans serif"
 [server]
 headless = true
 runOnSave = false
+# No source-file watcher in deployment. Streamlit's watcher evicts the app's modules from sys.modules at the
+# start of each session's next run after a file change (e.g. a git push to Streamlit Cloud). With several
+# sessions active, one session can evict phoenix_core.* while another is importing it, which crashes
+# @dataclass with "'NoneType' object has no attribute '__dict__'". Restart / reboot the app to load new code.
+fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false
