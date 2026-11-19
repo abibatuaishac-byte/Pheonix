@@ -67,11 +67,49 @@ def test_summary_counts(hz):
 
 def test_road_length_inside(hz):
     road = {"geometry": LineString([(-13.235, 8.475), (-13.215, 8.475)]), "class": "Primary road",
-            "name": "Test Rd", "bridge": True}
-    r = analysis.road_exposure([road], hz, 0)
-    assert abs(r["total_km"] - 2.2) < 0.05
+            "name": "Test Rd", "bridge": False}
+    bridge = {"geometry": LineString([(-13.235, 8.476), (-13.215, 8.476)]), "class": "Primary road",
+              "name": "Test Bridge", "bridge": True}
+    r = analysis.road_exposure([road, bridge], hz, 0)
+    assert abs(r["total_km"] - 2.2) < 0.05            # bridge excluded from totals
     assert abs(r["exposed_km"] - 1.1) < 0.05
-    assert r["bridges_exposed"] == 1 and len(r["exposed_geoms"]) == 1
+    assert r["bridge_segments_excluded"] == 1 and len(r["exposed_geoms"]) == 1
+
+
+def test_duplicate_osm_facilities_are_merged():
+    df = pd.DataFrame({"osm_id": ["way/1", "way/2", "node/3", "node/4", "node/5"],
+                       "name": ["Hope School", "hope school ", "Hope School", None, None],
+                       "category": ["School", "School", "School", "Clinic / health centre", "Clinic / health centre"],
+                       "lat": [8.47, 8.4702, 8.48, 8.47, 8.47], "lon": [-13.23, -13.23, -13.23, -13.23, -13.23]})
+    out, merged = data.merge_duplicate_facilities(df, (8.47, -13.23))
+    assert merged == 1                                 # 22 m apart merged; 1.1 km apart kept; unnamed never merged
+    assert len(out) == 4 and (out["name"].fillna("").str.lower().str.strip() == "hope school").sum() == 2
+
+
+def test_no_raw_json_dumps_in_app():
+    src = (ROOT / "app.py").read_text() + (ROOT / "phoenix_core" / "alerts_ui.py").read_text()
+    assert "st.json(" not in src
+
+
+def test_assistant_without_external_ai(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    city = CITIES["new_orleans"]
+    facts = assistant.build_fact_sheet(city, city.scenarios[0], 0, analysis.summarise_facilities(pd.DataFrame()),
+                                       pd.DataFrame(columns=["display_name", "category", "exposed"]), {"assessed": False}, {})
+    ans, mode = assistant.answer("give me a situation brief", facts)
+    assert mode == "Built-in PHOENIX analyst" and "{" not in ans
+
+
+def test_assistant_external_failure_is_graceful(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    def fail(*a, **k):
+        raise RuntimeError("401 invalid x-api-key sk-test")
+    monkeypatch.setattr(assistant, "claude_answer", fail)
+    city = CITIES["freetown"]
+    facts = assistant.build_fact_sheet(city, city.scenarios[0], 0, analysis.summarise_facilities(pd.DataFrame()),
+                                       pd.DataFrame(columns=["display_name", "category", "exposed"]), {"assessed": False}, {})
+    ans, mode = assistant.answer("summary", facts)
+    assert "sk-test" not in ans and "401" not in ans and "unavailable" in mode
 
 
 def test_service_gap_gets_worse_when_facility_lost(hz):

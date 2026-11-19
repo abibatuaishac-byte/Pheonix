@@ -356,8 +356,8 @@ def key_findings() -> list[str]:
             out.append(f"<b>Highest share exposed:</b> {w['Category']} ({w['Share exposed']:.0%}, "
                        f"{int(w['Exposed'])} of {int(w['Total'])}).")
     if rinfo.get("assessed"):
-        out.append(f"<b>Access:</b> {rinfo['exposed_km']} km of {rinfo['total_km']} km of major roads lie in the hazard "
-                   f"area; {rinfo['bridges_exposed']} mapped bridge segments affected.")
+        out.append(f"<b>Access:</b> {rinfo['exposed_km']} km of {rinfo['total_km']} km of at-grade major roads lie in "
+                   "the hazard area (screening only; not a closure forecast).")
     if ft_cur:
         out.append(f"<b>Buildings:</b> {ft_cur['buildings_in_extent']:,} modelled buildings "
                    f"({money(ft_cur['value_in_extent_usd'])} replacement value) are inside the {scenario.short} extent.")
@@ -456,7 +456,7 @@ def page_overview():
         kpis.append(("Modelled buildings in extent", f"{ft_cur['buildings_in_extent']:,}",
                      money(ft_cur["value_in_extent_usd"]) + " replacement value", "alert"))
     if rinfo.get("assessed"):
-        kpis.append(("Major roads in hazard", f"{rinfo['exposed_km']} km", f"of {rinfo['total_km']} km mapped", "accent"))
+        kpis.append(("Major roads in hazard", f"{rinfo['exposed_km']} km", f"of {rinfo['total_km']} km at-grade mapped", "accent"))
     st.markdown(theme.cards(kpis), unsafe_allow_html=True)
 
     left, right = st.columns([1.55, 1])
@@ -469,6 +469,14 @@ def page_overview():
         st.markdown("### Key findings")
         for f in key_findings():
             st.markdown(f'<div class="px-find">{f}</div>', unsafe_allow_html=True)
+        if not scenario:
+            nxt = "See <b>Data Sources and Methodology</b> for what data this city still needs."
+        elif n_exposed:
+            nxt = (f"Open <b>Infrastructure Exposure</b> to review the {n_exposed:,} exposed facilities, or "
+                   "<b>WHAT IF?</b> to compare scenarios.")
+        else:
+            nxt = "Use <b>WHAT IF?</b> to test a larger flood or a wider screening distance."
+        st.markdown(theme.note("<b>Next step:</b> " + nxt), unsafe_allow_html=True)
         st.markdown("### City profile")
         st.markdown(f"{city.context}<br><span class='px-muted'>{city.population_note}</span>", unsafe_allow_html=True)
         st.markdown(f"<span class='px-muted'>Study area: {theme.esc(city.study_area_note)}</span>", unsafe_allow_html=True)
@@ -677,21 +685,22 @@ def page_infra():
         st.download_button("Download exposed facilities (CSV)", show.to_csv(index=False).encode("utf-8"),
                            file_name=f"phoenix_{slug}_{scen_key}_exposed_facilities.csv", mime="text/csv")
         if rinfo.get("assessed"):
-            st.markdown("### Road network and bridges")
+            st.markdown("### Major road network")
             r1, r2 = st.columns([1, 1])
             with r1:
                 st.dataframe(rinfo["by_class"].rename(columns={"class": "Road class", "total_km": "Total km",
                                                                "exposed_km": "km in hazard area"}),
                              width="stretch", hide_index=True, column_config={
                                  "Share exposed": st.column_config.ProgressColumn(format="%.0f%%", min_value=0, max_value=1)})
-                st.caption(f"Mapped bridge segments in hazard area: {rinfo['bridges_exposed']} of {rinfo['bridges_total']}.")
+                st.caption(f"{rinfo['bridge_segments_excluded']} bridge / elevated road segments are excluded: their "
+                           "height above flood level is unknown.")
             with r2:
                 tn = rinfo["top_named_km"]
                 if len(tn):
                     st.dataframe(tn.rename_axis("Most affected named roads").reset_index(name="km in hazard area"),
                                  width="stretch", hide_index=True)
-            st.caption("Being inside a flood zone does not mean a road is impassable; depth, drainage and elevation "
-                       "(e.g. raised highways) are not modelled.")
+            st.caption("Lengths are mapped road centre-lines (divided roads count each direction). Being inside a "
+                       "flood zone does not mean a road would be closed; depth and drainage are not modelled.")
         elif scenario and not roads(slug):
             st.info("Road network data is not loaded for this city yet.")
         if ft_cur:
@@ -752,14 +761,14 @@ def page_whatif():
                     st.error(f"All {g['facilities_total']} facilities of this type are exposed in this scenario.")
                 else:
                     st.markdown(theme.cards([
-                        ("Out of service", f"{g['facilities_lost']} of {g['facilities_total']}", "exposed facilities", "alert"),
-                        ("Median distance before", f"{g['median_before_m'] / 1000:.2f} km", "to nearest facility", "accent"),
-                        ("Median distance after", f"{g['median_after_m'] / 1000:.2f} km",
-                         f"90th percentile {g['p90_after_m'] / 1000:.2f} km", "alert"),
-                        ("Area served further away", f"{g['share_further']:.0%}", f"of {g['n_demand']:,} sample points", "cyan"),
+                        ("Treated as out of service", f"{g['facilities_lost']} of {g['facilities_total']}",
+                         "exposed facilities of this type", "alert"),
+                        ("Area further from service", f"{g['share_further']:.0%}",
+                         "of the study area's sample points", "cyan"),
                     ]), unsafe_allow_html=True)
-                    st.caption("Sample points: a regular 500 m grid over the study area (a neutral stand-in for where "
-                               "people are; population data is not loaded). Straight-line distance, not road travel time.")
+                    st.caption("Indicative screening result, not a prediction of service interruption. The study area "
+                               "is sampled with a 500 m grid (population is not loaded); distances are straight-line, "
+                               "and city limits that include open water (New Orleans, Miami) add sample points over water.")
     with st.expander("Teaching scenario: rainfall slider (ILLUSTRATIVE ONLY)", expanded=not scenario):
         st.warning("ILLUSTRATIVE ONLY. Fictional assets and a hand-made score that show how a rainfall-driven tool could "
                    "feel. Not calibrated, not a forecast, and not a probability of flooding.")
@@ -780,12 +789,14 @@ def page_whatif():
 
 def page_assistant():
     facts = facts_for_assistant()
-    mode = "Claude (grounded on the fact sheet)" if assistant.claude_available() else "Built-in grounded analyst"
-    st.markdown(theme.note(f"<b>Mode: {mode}.</b> Answers come only from the analysis currently on screen "
-                           f"({theme.esc(city.name)}, {theme.esc(scenario.label if scenario else 'no scenario')}). "
-                           "Set the <code>ANTHROPIC_API_KEY</code> environment variable to enable Claude for free-form "
-                           "questions; without it the built-in analyst answers common questions deterministically."),
-                unsafe_allow_html=True)
+    mode = "Claude (external AI, grounded on PHOENIX data)" if assistant.claude_available() else "Built-in PHOENIX analyst"
+    st.markdown(theme.note(
+        f"<b>Mode: {mode}.</b> Ask about exposed facilities, roads, priority areas, scenarios, data sources or the "
+        f"forecast for {theme.esc(city.name)} ({theme.esc(scenario.label if scenario else 'no hazard scenario')}). "
+        "Answers use only the analysis on screen; if the data does not cover a question, the assistant says so. "
+        + ("" if assistant.claude_available() else
+           "The built-in analyst answers common questions without any external AI service.")),
+        unsafe_allow_html=True)
     hist_key = f"chat_{slug}"
     hist = st.session_state.setdefault(hist_key, [])
     suggestions = ["Give me a situation brief", "Which hospitals and clinics are exposed?",
@@ -813,8 +824,23 @@ def page_assistant():
     if c1.button("Clear conversation"):
         st.session_state[hist_key] = []
         st.rerun()
-    with st.expander("Fact sheet used by the assistant (audit trail)"):
-        st.json(json.loads(json.dumps(facts, default=str)))
+    with st.expander("What the assistant knows (data behind every answer)"):
+        st.markdown(f"**City:** {facts['city']} · **Scenario:** {facts['scenario']['label'] if facts['scenario'] else 'none'}"
+                    f" · **Facilities analysed:** {facts['facilities_total']:,} · **Exposed:** {facts['facilities_exposed']:,}")
+        st.caption(facts["exposure_definition"])
+        if facts["facilities_by_category"]:
+            st.dataframe(pd.DataFrame(facts["facilities_by_category"]), width="stretch", hide_index=True,
+                         column_config={"Share exposed": st.column_config.ProgressColumn(format="%.0f%%",
+                                                                                        min_value=0, max_value=1)})
+        if facts.get("roads"):
+            r = facts["roads"]
+            st.markdown(f"**Major roads (at grade):** {r['exposed_km']} of {r['total_km']} km in the hazard area.")
+        if facts.get("scenario_comparison"):
+            st.dataframe(pd.DataFrame(facts["scenario_comparison"]).rename(columns={
+                "scenario": "Scenario", "exposed": "Exposed facilities", "buildings": "Modelled buildings"}),
+                width="stretch", hide_index=True)
+        if facts["missing_data"]:
+            st.markdown("**Not available:** " + "; ".join(facts["missing_data"]))
 
 
 def page_methods():
@@ -829,8 +855,29 @@ def page_methods():
         st.markdown(f"- {m}")
     man = city.manifest
     if man:
-        with st.expander("Processing manifest (counts, retrieval dates, FIRM panels)"):
-            st.json(man)
+        with st.expander("Data processing details"):
+            rows = []
+            fac, rd, fe = man.get("facilities", {}), man.get("roads", {}), man.get("fema", {})
+            if fac:
+                rows.append({"Item": "Critical facilities (OpenStreetMap)",
+                             "Detail": f"{fac.get('count', 0):,} features inside the study area; {fac.get('unnamed', 0)} "
+                                       "unnamed. Same-name features within 100 m are merged into one facility.",
+                             "Date": str(fac.get("osm_timestamp", ""))[:10]})
+            if rd:
+                rows.append({"Item": "Major roads (OpenStreetMap)",
+                             "Detail": f"{rd.get('count', 0):,} road segments, of which {rd.get('bridges', 0)} are "
+                                       "bridges / elevated (excluded from exposure).",
+                             "Date": str(rd.get("osm_timestamp", ""))[:10]})
+            if fe:
+                panels = ", ".join(f"{p['DFIRM_ID']} (version {p['VERSION_ID']})" for p in fe.get("firm_panels", []))
+                rows.append({"Item": "FEMA flood zones",
+                             "Detail": f"{fe.get('raw_features', 0):,} source polygons dissolved by zone. "
+                                       f"Flood map database(s): {panels or 'n/a'}.",
+                             "Date": fe.get("retrieved", "")})
+            sa = man.get("study_area", {})
+            if sa:
+                rows.append({"Item": "Study area", "Detail": sa.get("name", ""), "Date": sa.get("retrieved", "")})
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
     st.markdown("### Coverage across cities")
     cov = []
     for c in CITIES.values():
@@ -847,12 +894,14 @@ def page_methods():
    annual-chance Special Flood Hazard Area and the 1% + 0.2% area, clipped to the study area.
 2. **Infrastructure.** Hospitals, clinics, schools, colleges, fire stations, police, shelters and assembly points,
    and motorway-to-secondary roads from OpenStreetMap (HOT Raw Data API / Overpass extracts). Polygons are reduced to their centre point.
-   Names are never invented: unnamed features are labelled *Unnamed* with their OSM id.
+   Names are never invented: unnamed features are labelled *Unnamed* with their OSM id. Features with the same
+   name and type within 100 m (e.g. a point plus a building outline, or each building of one school) are merged.
 3. **Coordinate handling.** All data is stored in WGS84 (EPSG:4326). Distances, areas and lengths are computed in a
    local metric projection centred on each city (error well under 1% at city scale). Uploaded layers that are not
    in longitude/latitude are rejected rather than drawn in the wrong place.
 4. **Exposure.** A facility is *exposed* if it is inside the hazard area, or within the screening distance chosen
-   in the sidebar. Road exposure is the length of road inside the (buffered) hazard area. Freetown building exposure
+   in the sidebar. Road exposure is the length of at-grade road inside the (buffered) hazard area; bridges and
+   elevated sections are excluded because their height above flood level is unknown. Freetown building exposure
    comes from a full-resolution overlay of the World Bank exposure model (`prepare_data.py`).
 5. **Service disruption.** Exposed facilities are treated as out of service and straight-line distance from a 500 m
    grid of sample points to the nearest working facility is compared before and after.

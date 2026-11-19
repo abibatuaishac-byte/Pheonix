@@ -89,8 +89,8 @@ def _briefing(f) -> str:
         lines += _cat_lines(f, ["hospital", "clinic", "school", "fire", "police", "shelter"])
         if f.get("roads"):
             r = f["roads"]
-            lines.append(f"- **Major roads:** {r['exposed_km']} km of {r['total_km']} km lie in the hazard area; "
-                         f"{r['bridges_exposed']} of {r['bridges_total']} mapped bridge segments are affected.")
+            lines.append(f"- **Major roads (at grade):** {r['exposed_km']} km of {r['total_km']} km of mapped road lies "
+                         "in the hazard area (bridges and elevated sections excluded).")
         if f.get("buildings"):
             b = f["buildings"]
             lines.append(f"- **Buildings (modelled):** {fmt_int(b['in_extent'])} buildings worth about "
@@ -137,12 +137,12 @@ def grounded_answer(question: str, f: dict) -> str:
         named = _named(f, ["hospital", "clinic"])
         if named:
             lines += ["", "Closest to or inside the hazard area:"] + named
-        if f.get("service_gap_health"):
-            g = f["service_gap_health"]
-            if g.get("assessed") and not g.get("all_lost"):
-                lines.append(f"\nIf exposed hospitals/clinics were unusable, the median straight-line distance from "
-                             f"points across the study area (500 m grid) to the nearest working facility would go from "
-                             f"{g['median_before_m']:.0f} m to {g['median_after_m']:.0f} m.")
+        g = f.get("service_gap_health")
+        if g and g.get("assessed") and g.get("facilities_lost"):
+            lines.append(f"\nIndicative only: if the {g['facilities_lost']} exposed health facilities could not operate, "
+                         f"about {g['share_further']:.0%} of the study area would be further (straight-line) from its "
+                         "nearest working health facility. This is a screening estimate, not a prediction of service "
+                         "interruption.")
         lines.append(f"\n_{f['exposure_definition']} OSM facility coverage may be incomplete._")
         return "\n".join(lines)
     if intent == "schools":
@@ -165,8 +165,9 @@ def grounded_answer(question: str, f: dict) -> str:
         if r.get("top_named_km"):
             lines.append("\nMost affected named roads (km in hazard area): " + ", ".join(
                 f"{k} ({v})" for k, v in list(r["top_named_km"].items())[:6]) + ".")
-        lines.append(f"\nMapped bridge segments affected: {r['bridges_exposed']} of {r['bridges_total']}. "
-                     "_Being in the hazard area does not mean a road would be closed; depth and drainage are not modelled._")
+        lines.append(f"\n{r.get('bridge_segments_excluded', 0)} bridge / elevated segments are excluded because "
+                     "their height above flood level is not known. _Being in the hazard area does not mean a road "
+                     "would be closed; depth and drainage are not modelled. Divided roads count each direction._")
         return "\n".join(lines)
     if intent == "priority":
         if f.get("priority_wards"):
@@ -249,8 +250,8 @@ def answer(question: str, facts: dict, history: list[dict] | None = None) -> tup
     """Return (answer_markdown, mode)."""
     if claude_available():
         try:
-            return claude_answer(question, facts, history or []), "Claude (grounded on fact sheet)"
+            return claude_answer(question, facts, history or []), "Claude (external AI, grounded on PHOENIX data)"
         except Exception as exc:  # fall back, but say so
-            return grounded_answer(question, facts) + f"\n\n_(Claude unavailable: {re.sub(r'key=[^&]+', '', str(exc))[:120]}; " \
-                   "answered by the built-in grounded analyst.)_", "Grounded analyst (fallback)"
-    return grounded_answer(question, facts), "Grounded analyst"
+            return grounded_answer(question, facts) + ("\n\n_(The external AI service was unavailable, so the built-in "
+                                                       "analyst answered.)_"), "Built-in PHOENIX analyst (external AI unavailable)"
+    return grounded_answer(question, facts), "Built-in PHOENIX analyst"

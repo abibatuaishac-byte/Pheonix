@@ -117,6 +117,12 @@ def road_exposure(roads: list[dict], hazard: HazardIndex | None, buffer_m: float
     """
     if hazard is None or not roads:
         return {"assessed": False}
+    # Bridges and elevated sections (OSM bridge=yes) are excluded: they usually sit above flood level and no
+    # elevation data is available to judge them, so counting them as "in the hazard area" would mislead.
+    n_bridge = sum(1 for r in roads if r.get("bridge"))
+    roads = [r for r in roads if not r.get("bridge")]
+    if not roads:
+        return {"assessed": False}
     lines = [hazard.proj.forward(r["geometry"]) for r in roads]
     lengths = shapely.length(lines)
     inside_len = np.zeros(len(lines))
@@ -150,15 +156,13 @@ def road_exposure(roads: list[dict], hazard: HazardIndex | None, buffer_m: float
     by_class["Share exposed"] = (by_class["exposed_km"] / by_class["total_km"]).fillna(0)
     named = df[df["name"] != ""].groupby("name")["inside_m"].sum().sort_values(ascending=False)
     named = (named[named > 0] / 1000).round(2).head(10)
-    bridges = df[df["bridge"]]
     return {
         "assessed": True,
         "total_km": round(df["length_m"].sum() / 1000, 1),
         "exposed_km": round(df["inside_m"].sum() / 1000, 1),
         "by_class": by_class.reset_index(),
         "top_named_km": named,
-        "bridges_total": int(len(bridges)),
-        "bridges_exposed": int((bridges["inside_m"] > 0).sum()),
+        "bridge_segments_excluded": int(n_bridge),
         "exposed_geoms": exposed_geoms,
     }
 

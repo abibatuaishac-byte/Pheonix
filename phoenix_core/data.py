@@ -58,10 +58,56 @@ def facilities(city: City) -> pd.DataFrame:
                      "lat": lat, "lon": lon, "operator": p.get("operator"), "addr": p.get("addr"),
                      "source": "OpenStreetMap"})
     df = pd.DataFrame(rows, columns=cols)
+    df, merged = merge_duplicate_facilities(df, city.center)
+    df.attrs["merged_duplicates"] = merged
     df["display_name"] = df["name"].fillna("").where(df["name"].notna(), None)
     df["display_name"] = [n if isinstance(n, str) and n else f"Unnamed {c.lower()} ({oid})"
                           for n, c, oid in zip(df["name"], df["category"], df["osm_id"])]
     return df
+
+
+def merge_duplicate_facilities(df: pd.DataFrame, center, radius_m: float = 100.0) -> tuple[pd.DataFrame, int]:
+    """Merge OSM features with the same name and category within radius_m into one facility.
+
+    OSM often maps one facility several times (a point plus a building outline, or every building of a school
+    campus tagged as a school). Counting each would inflate exposure counts. Unnamed features are never merged.
+    The merged facility keeps the first record's id and the mean location of its parts.
+    """
+    if df.empty:
+        return df, 0
+    import numpy as np
+    from .geo import LocalProjection
+    proj = LocalProjection(*center)
+    key = df["name"].fillna("").str.strip().str.lower()
+    keep, drop = [], set()
+    for (_, _cat), g in df[key != ""].groupby([key[key != ""], df.loc[key != "", "category"]]):
+        if len(g) < 2:
+            continue
+        xy = np.column_stack(((g["lon"] - proj.lon0) * proj.kx, (g["lat"] - proj.lat0) * proj.ky))
+        idx = list(g.index)
+        parent = {i: i for i in idx}
+
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        for a in range(len(idx)):
+            for b in range(a + 1, len(idx)):
+                if np.hypot(*(xy[a] - xy[b])) <= radius_m:
+                    parent[find(idx[b])] = find(idx[a])
+        groups: dict = {}
+        for i in idx:
+            groups.setdefault(find(i), []).append(i)
+        for root, members in groups.items():
+            if len(members) > 1:
+                keep.append((root, df.loc[members, "lat"].mean(), df.loc[members, "lon"].mean()))
+                drop.update(m for m in members if m != root)
+    out = df.copy()
+    for root, lat, lon in keep:
+        out.loc[root, ["lat", "lon"]] = [lat, lon]
+    out = out.drop(index=list(drop)).reset_index(drop=True)
+    return out, len(drop)
 
 
 def roads(city: City) -> list[dict]:

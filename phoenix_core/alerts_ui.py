@@ -206,7 +206,19 @@ def tab_dashboard(store, provider, slug):
             else:
                 st.success(msg)
             with st.expander("What was checked"):
-                st.json(ev["sources"])
+                rows = []
+                for c, v in ev["sources"].items():
+                    nws = v.get("nws")
+                    fc = v.get("forecast", [])
+                    rows.append({"City": CITIES[c].name if c in CITIES else c,
+                                 "Registered locations": v.get("recipients", 0),
+                                 "Official warnings (NWS)": (f"{nws.get('ok_queries', 0)} checked, "
+                                                             f"{nws.get('failed_queries', 0)} unreachable, "
+                                                             f"{nws.get('flood_alerts', 0)} flood alert(s)")
+                                 if isinstance(nws, dict) else "No official feed for this country",
+                                 "Rainfall forecast": (f"{sum(1 for f in fc if f.get('ok'))} of {len(fc)} areas checked"
+                                                       if fc else "-")})
+                st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         else:
             st.error("The check could not be completed. Technical details are in *Setup & help*.")
     if mon.running:
@@ -267,10 +279,12 @@ def tab_dashboard(store, provider, slug):
     c1, c2 = st.columns(2)
     prov_ok = provider.configured()[0]
     if c1.button("Retry failed messages", disabled=not prov_ok):
-        st.write(alerts.retry_failed(store, provider))
+        r = alerts.retry_failed(store, provider)
+        st.info(f"Retried {r['retried']}: {r['sent']} accepted by Twilio, {r['failed']} failed again, "
+                f"{r['gave_up']} not retried (permanent error or attempt limit).")
     if c2.button("Refresh delivery status", disabled=not prov_ok,
                  help="Asks Twilio for the latest status of messages it accepted."):
-        st.write(f"{alerts.refresh_statuses(store, provider)} status update(s).")
+        st.info(f"{alerts.refresh_statuses(store, provider)} delivery status update(s) received from Twilio.")
 
 
 def tab_recipients(store, slug):
