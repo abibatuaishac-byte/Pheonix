@@ -713,3 +713,71 @@ def test_demo_sends_never_counted_as_alert_deliveries(store):
     alerts.send_test(store, MockProvider(), aid, rid)
     s = alerts.dashboard_stats(store)
     assert s["attempted"] == 0 and s["alerts"] == 0 and s["tests"] == 1
+
+
+# ---------------------------------------------------------------- risk + preventive advice in SMS
+def _tips(m):
+    return [line[2:] for line in m.split("\n") if line.startswith("- ")]
+
+
+def test_forecast_notice_sms_has_place_level_reason_advice_and_reminder(store):
+    add(store, phone="+23276123456", city="freetown", lat=FT_PT[0], lon=FT_PT[1], area="Kroo Town")
+    prov = MockProvider()
+    run(store, prov, forecast_fetch=forecast(5.0))            # 120 mm / 24 h, threshold 50
+    m = prov.outbox[0]["body"]
+    assert "Freetown - Kroo Town" in m and "risk" in m and "mm of rain" in m          # where, level, why
+    assert "Not an official warning" in m and "possible, not certain" in m           # potential, not certain
+    assert 3 <= len(_tips(m)) <= 4 and alerts.TIP_WATER in _tips(m)
+    assert alerts.TIP_HIGHER not in m        # a PHOENIX model notice never tells people to evacuate
+    assert alerts.REMINDER_RISK in m and m.endswith("Reply STOP to opt out, HELP for help.")
+    assert len(m) <= alerts.MAX_SMS_CHARS and m.isascii() and "23276123456" not in m
+
+
+def test_official_warning_sms_advice_and_not_presented_as_authority(store):
+    add(store, area="Mid-City")
+    prov = MockProvider()
+    run(store, prov, nws_fetch=nws_fixed(nws_feature("Flash Flood Warning", aid="X9")))
+    m = prov.outbox[0]["body"]
+    assert m.startswith("PHOENIX flood alert (HIGH) New Orleans - Mid-City")        # the person's own area
+    assert "OFFICIAL: US National Weather Service Flash Flood Warning" in m
+    assert alerts.TIP_HIGHER in _tips(m) and 3 <= len(_tips(m)) <= 4
+    assert "PHOENIX is not an emergency service" in m and "Not an official warning" not in m
+    assert len(m) <= alerts.MAX_SMS_CHARS
+
+
+@pytest.mark.parametrize("level", [1, 2, 3, 4])
+@pytest.mark.parametrize("official", [False, True])
+def test_every_message_keeps_safety_parts_even_with_long_text(level, official):
+    a = {"city": "new_orleans", "level": level, "category": rm.LEVELS[level],
+         "source_type": "official_warning" if official else "model_forecast",
+         "area_label": "Area " * 30, "headline": "very long headline " * 30}
+    for test in (False, True):
+        m = alerts.build_message(a, test=test)
+        assert len(m) <= alerts.MAX_SMS_CHARS and m.isascii()
+        assert len(_tips(m)) >= alerts.MIN_TIPS and _tips(m) == alerts.ADVICE_SMS[level][:len(_tips(m))]
+        assert (alerts.REMINDER_OFFICIAL if official else alerts.REMINDER_RISK) in m
+        assert m.endswith("HELP for help.") and (m.startswith("TEST ONLY") == test)
+        if not official:
+            assert "Not an official warning" in m and alerts.POSSIBLE in m
+
+
+def test_advice_demonstration_message_is_clearly_an_example():
+    m = alerts.build_message(alerts.demo_advice_alert("new_orleans", "Mid-City"), test=True)
+    assert m.startswith("PHOENIX DEMONSTRATION - not an official emergency alert. No action needed.")
+    assert "Example: New Orleans - Mid-City, ELEVATED risk." in m and alerts.POSSIBLE in m
+    assert len(_tips(m)) >= 3 and alerts.REMINDER_RISK in m and "Warning" not in m
+    assert len(m) <= alerts.MAX_SMS_CHARS and m.isascii()
+
+
+def test_advice_demo_send_is_single_test_and_never_dispatched(store):
+    rid = add(store)
+    prov = MockProvider()
+    aid = alerts.make_test_alert(store, "new_orleans", 2, "Mid-City", False, advice_demo=True)
+    assert store.one("SELECT is_test, source_type FROM alerts WHERE id=?", (aid,)) == \
+        {"is_test": 1, "source_type": alerts.DEMO_ADVICE_SOURCE_TYPE}
+    assert alerts.dispatch(store, prov) == {"sent": 0, "failed": 0, "skipped": 0, "reasons": {}}
+    assert alerts.send_test(store, prov, aid, rid) == "sent" and len(prov.outbox) == 1
+    assert "Advice:" in prov.outbox[0]["body"]
+    with pytest.raises(alerts.RepeatSendBlocked):
+        alerts.send_test(store, prov, alerts.make_test_alert(store, "new_orleans", 2, "Mid-City", False,
+                                                             advice_demo=True), rid)

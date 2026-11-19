@@ -116,6 +116,17 @@ level). PHOENIX checks credible sources for each registered location and produce
 | Open-Meteo rainfall forecast vs an administrator-set screening threshold + whether the location is in a mapped flood zone | all four | INFORMATIONAL, or ELEVATED if in a mapped zone (never higher) | "PHOENIX flood risk notice ... Not an official warning" |
 | Flood hazard maps (World Bank / FEMA) | all four | nothing on their own; context only | - |
 
+**Message content (max 459 characters = 3 SMS segments).** Each SMS gives the city and the person's own registered
+neighbourhood, the risk level, a one-line reason, 3-4 preventive actions chosen for that level (e.g. never walk or
+drive through floodwater; move documents, valuables and electricals up high; ready water, medicine, a flashlight and
+supplies; keep the phone charged), and a reminder to follow official alerts and local authorities. PHOENIX forecast
+notices say "Not an official warning" and "Flooding possible, not certain", and never advise evacuation. "Move to
+higher ground if authorities instruct" is added only for HIGH/CRITICAL, which only an official NWS warning can
+produce; those messages also say "PHOENIX is not an emergency service". If space runs short, lower-priority advice
+is dropped first (never below 3), then the reason line is shortened; labels, reminder and STOP/HELP are never cut.
+The *Send Test SMS* tab has a "Demonstration: flood risk notice + preventive advice" message that shows this format
+and is clearly marked as a demonstration example.
+
 Freetown has no machine-readable official warning feed integrated, so it can only receive PHOENIX forecast notices.
 The rainfall threshold is a local setting, **not** a validated flood trigger; agree it with local experts.
 

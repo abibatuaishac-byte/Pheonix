@@ -70,6 +70,33 @@ def _tiled_parts(g, cell_m: float = 1000.0, max_coords: int = 400) -> list:
     return out
 
 
+def area_outside(a, b, cell: float = 0.02, max_coords: int = 400) -> float:
+    """Area of ``a`` not covered by ``b`` (same value as ``a.difference(b).area``), in the units of the inputs.
+
+    A single difference of two city-wide FEMA multipolygons (New Orleans: ~400k vertices, one 500-year part
+    with 16k holes) needs hundreds of MB in one GEOS call and can fail with "bad allocation" when less memory
+    is free. Here both inputs are cut into small tiles (the same tiling the app uses for hazard queries) and
+    only tiles that touch are overlaid, so memory is bounded by tile size, not by city size.
+    """
+    if a is None or a.is_empty:
+        return 0.0
+    if b is None or b.is_empty:
+        return float(a.area)
+    ta = np.array(_tiled_parts(a, cell, max_coords), dtype=object)
+    tree = STRtree(_tiled_parts(b, cell, max_coords))
+    covered = np.zeros(len(ta), bool)
+    covered[np.unique(tree.query(ta, predicate="covered_by")[0])] = True   # fully inside one b tile: 0
+    near: dict[int, list[int]] = {}
+    for i, j in zip(*tree.query(ta, predicate="intersects")):
+        if not covered[i]:
+            near.setdefault(int(i), []).append(int(j))
+    out = 0.0
+    for i in np.flatnonzero(~covered):
+        js = near.get(int(i))
+        out += ta[i].area if not js else shapely.difference(ta[i], shapely.union_all(tree.geometries.take(js))).area
+    return float(out)
+
+
 def facility_exposure(facilities: pd.DataFrame, hazard: HazardIndex | None, buffer_m: float = 0.0) -> pd.DataFrame:
     """Add ``dist_to_hazard_m`` and ``status`` columns to a copy of ``facilities``.
 

@@ -191,7 +191,28 @@ def test_sfha_inside_500yr_for_us_cities():
             continue
         a = data.hazard_geometry(c.available_scenarios[0])
         b = data.hazard_geometry(c.available_scenarios[1])
-        assert a.difference(b).area / a.area < 0.001, slug
+        # Same quantity as a.difference(b).area, computed tile by tile: the one-shot overlay of the full
+        # New Orleans layers failed with GEOS "bad allocation" on Windows.
+        assert analysis.area_outside(a, b) / a.area < 0.001, slug
+
+
+def test_area_outside_equals_shapely_difference():
+    """Regression test for the tiled overlay: exact agreement with a.difference(b).area, including holes,
+    partial overlap, no overlap, and inputs large enough to be split into many tiles."""
+    ring = box(0, 0, 10, 10).difference(box(3, 3, 6, 6))                     # square with a hole
+    cases = [(ring, box(5, -1, 12, 11)), (box(0, 0, 4, 4), box(10, 10, 12, 12)), (ring, box(-1, -1, 11, 11)),
+             (ring, ring), (box(0, 0, 4, 4), None),
+             (Polygon([(x / 10, (x % 7) / 3) for x in range(0, 700, 3)] + [(70, -5), (0, -5)]).buffer(0), ring)]
+    for a, b in cases:
+        want = a.area if b is None else a.difference(b).area
+        got = analysis.area_outside(a, b, cell=0.7, max_coords=8)               # force heavy tiling
+        assert abs(got - want) <= 1e-9 * max(a.area, 1), (got, want)
+    # real data: Houston is small enough to check against the one-shot difference both ways
+    c = CITIES["houston"]
+    sfha, z500 = (data.hazard_geometry(s) for s in c.available_scenarios[:2])
+    for a, b in ((sfha, z500), (z500, sfha)):
+        assert abs(analysis.area_outside(a, b) - a.difference(b).area) <= 1e-6 * a.area
+    assert analysis.area_outside(z500, sfha) / z500.area > 0.001   # the containment check can still fail
 
 
 def test_streamlit_file_watcher_disabled_for_deployment():

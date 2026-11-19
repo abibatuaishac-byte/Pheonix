@@ -441,7 +441,7 @@ def tab_history(store, slug):
                                     "Source": a["source"], "Escalated from": a["escalated_from"] or "",
                                     "Expires": a["expires_at"] or ""} for a in rows]), width="stretch", hide_index=True)
         a = st.selectbox("Details for alert", rows, format_func=lambda a: f"#{a['id']} {a['category']} {a['area_label'][:60]}")
-        st.markdown(f"**Why:** {a['explanation']}\n\n**Precautions:** {a['precautions']}\n\n**SMS text:**")
+        st.markdown(f"**Why:** {a['explanation']}\n\n**Precautions:** {a['precautions']}\n\n**SMS text** (each person sees their own registered neighbourhood):")
         st.code(alerts.build_message(a, test=bool(a["is_test"])), language=None)
     st.markdown("### SMS delivery status")
     d = store.q("SELECT d.*, a.category, a.city FROM deliveries d LEFT JOIN alerts a ON a.id=d.alert_id "
@@ -457,8 +457,10 @@ def tab_history(store, slug):
                  width="stretch", hide_index=True)
 
 
-DEMO_STYLE = "PHOENIX demonstration message (recommended for live demos)"
-STYLES = [DEMO_STYLE, "Sample official warning (as relayed from NWS)", "Sample PHOENIX forecast notice"]
+ADVICE_DEMO_STYLE = "Demonstration: flood risk notice + preventive advice (recommended for live demos)"
+DEMO_STYLE = "Demonstration: short test message (no advice)"
+STYLES = [ADVICE_DEMO_STYLE, DEMO_STYLE, "Sample official warning (as relayed from NWS)", "Sample PHOENIX forecast notice"]
+DEMO_STYLES = (ADVICE_DEMO_STYLE, DEMO_STYLE)
 
 
 def tab_test(store, provider, slug):
@@ -471,7 +473,7 @@ def tab_test(store, provider, slug):
                         key="t_city")
     style = c2.selectbox("Message", STYLES, key="t_style")
     lvl = 2
-    if style != DEMO_STYLE:
+    if style not in DEMO_STYLES:
         lvl = st.selectbox("Sample alert category", LEVEL_OPTS, index=2, format_func=lambda l: rm.LEVELS[l], key="t_lvl")
     rs = [r for r in rm.list_recipients(store, city) if rm.is_active(r)]
     area = CITIES[city].name
@@ -482,12 +484,17 @@ def tab_test(store, provider, slug):
     else:
         st.info("No consenting recipient with SMS enabled in this city yet. Register one under *Registered recipients*; "
                 "you can still preview the message.")
-    sample = alerts.demo_alert(city, area) if style == DEMO_STYLE else \
-        alerts.sample_alert(city, lvl, area, style.startswith("Sample official"))
-    msg = alerts.build_message(sample, test=True)
+    if style == ADVICE_DEMO_STYLE:
+        sample = alerts.demo_advice_alert(city, area)
+    elif style == DEMO_STYLE:
+        sample = alerts.demo_alert(city, area)
+    else:
+        sample = alerts.sample_alert(city, lvl, area, style.startswith("Sample official"))
+    msg = alerts.build_message(sample, test=True, recipient_area=area)
     st.markdown("**Exact message the person will receive**")
     st.code(msg, language=None)
-    st.caption(f"{len(msg)} characters. Sender: {provider.sender_masked or 'not configured'}.")
+    st.caption(f"{len(msg)} characters ({-(-len(msg) // 153) if len(msg) > 160 else 1} SMS segment(s)). "
+               f"Sender: {provider.sender_masked or 'not configured'}.")
     if not pick:
         return
     if not provider.configured()[0]:
@@ -508,7 +515,8 @@ def tab_test(store, provider, slug):
                 try:
                     last = alerts.last_test_send(store, pick["id"])   # re-check right before sending
                     aid = alerts.make_test_alert(store, city, lvl, area, style.startswith("Sample official"),
-                                                 demonstration=(style == DEMO_STYLE))
+                                                 demonstration=(style == DEMO_STYLE),
+                                                 advice_demo=(style == ADVICE_DEMO_STYLE))
                     res = alerts.send_test(store, provider, aid, pick["id"])
                     d = store.one("SELECT status, error_code FROM deliveries WHERE is_test=1 AND recipient_id=? "
                                   "ORDER BY id DESC LIMIT 1", (pick["id"],))

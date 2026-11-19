@@ -179,6 +179,7 @@ def test_send_test_sms_flow_with_faked_twilio(monkeypatch):
     send().click(); at.run()
     assert len(posts) == 1 and posts[0]["To"] == "+15045550177"
     assert posts[0]["Body"].startswith("PHOENIX DEMONSTRATION - not an official emergency alert.")
+    assert "Advice:" in posts[0]["Body"] and "Example:" in posts[0]["Body"]   # default = demo with advice
     assert "Accepted by Twilio" in " ".join(x.value for x in at.success)
     # second approved attempt within the block window is refused
     next(c for c in at.checkbox if c.label.startswith("I approve sending ONE")).check()

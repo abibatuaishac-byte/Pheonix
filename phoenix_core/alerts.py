@@ -45,12 +45,30 @@ INFO_EVENTS = {"Flood Advisory", "Coastal Flood Advisory", "Lakeshore Flood Advi
                "Flood Statement", "Coastal Flood Statement", "Flash Flood Statement", "Hurricane Local Statement",
                "Tropical Cyclone Local Statement"}
 
-PRECAUTIONS_SMS = {
-    4: "Follow official instructions now; move to higher ground if told to; never enter flood water.",
-    3: "Avoid flood water and low roads; be ready to move to higher ground; follow official instructions.",
-    2: "Stay alert; keep clear of drains, streams and low roads; check official updates.",
-    1: "Be aware of possible heavy rain; check official updates.",
+# Short preventive / preparedness advice for SMS, in priority order per risk level. Messages carry the first
+# 3-4 that fit. "Move to higher ground" appears only at HIGH/CRITICAL, which only an official warning can
+# produce, and only as "if authorities instruct" - PHOENIX itself never orders an evacuation.
+TIP_WATER = "Never walk or drive through floodwater"
+TIP_ROADS = "Avoid low, exposed roads; use safer routes"
+TIP_VALUABLES = "Move documents, valuables, electricals up high"
+TIP_SUPPLIES = "Ready water, medicine, flashlight, supplies"
+TIP_PHONE = "Keep phone charged, emergency contacts handy"
+TIP_HIGHER = "Move to higher ground if authorities instruct"
+ADVICE_SMS = {
+    4: [TIP_HIGHER, TIP_WATER, TIP_PHONE, TIP_SUPPLIES],
+    3: [TIP_WATER, TIP_HIGHER, TIP_ROADS, TIP_VALUABLES],
+    2: [TIP_WATER, TIP_VALUABLES, TIP_SUPPLIES, TIP_PHONE],
+    1: [TIP_WATER, TIP_ROADS, TIP_PHONE, TIP_SUPPLIES],
 }
+MIN_TIPS = 3
+REMINDER_OFFICIAL = "Follow NWS and local authority instructions. PHOENIX is not an emergency service."
+REMINDER_RISK = "Follow official alerts and local authorities."
+POSSIBLE = "Flooding possible, not certain."
+# Wording shortened for SMS only (the full text stays on the dashboard).
+SMS_SHORTEN = ((" in the next 24 h (Open-Meteo model)", " in 24 h (Open-Meteo model)"),
+               ("forecast about ", "forecast ~"),
+               (" and your area is in a mapped flood zone", "; area is in a mapped flood zone"),
+               (" in effect for your registered area", " in effect for your area"))
 PRECAUTIONS_FULL = {
     4: "Follow instructions from official emergency services immediately. If told to evacuate, do so. Move to "
        "higher ground. Never walk, swim or drive through flood water. Keep your phone charged.",
@@ -62,7 +80,7 @@ PRECAUTIONS_FULL = {
 }
 TAIL = " Reply STOP to opt out, HELP for help."
 TEST_PREFIX = "TEST ONLY - NOT A REAL ALERT. "
-MAX_SMS_CHARS = 306   # two GSM-7 segments
+MAX_SMS_CHARS = 459   # three GSM-7 segments (153 characters each): room for risk + 3-4 advice lines
 
 
 def nws_level(props: dict) -> int | None:
@@ -184,25 +202,63 @@ DEMO_SOURCE_TYPE = "demonstration"
 TEST_RESEND_MINUTES = 10   # a second test to the same person within this time is refused
 
 
-def build_message(alert: dict, test: bool = False) -> str:
+DEMO_ADVICE_SOURCE_TYPE = "demonstration_advice"
+
+
+def _short(s: str, n: int = 32) -> str:
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= n else s[:n - 3].rstrip(" ,;") + "..."
+
+
+def _compose(head: list[str], why: str, tips: list[str], tail: list[str]) -> str:
+    """Assemble an SMS within MAX_SMS_CHARS. Space is recovered by dropping lower-priority tips (never below
+    MIN_TIPS), then by shortening the explanation. Labels, the official-alert reminder and STOP/HELP are never cut."""
+    for a, b in SMS_SHORTEN:
+        why = why.replace(a, b)
+
+    def render(w: str, n: int) -> str:
+        return gsm_safe("\n".join(head + ([w] if w else []) + ["Advice:"] + [f"- {t}" for t in tips[:n]] + tail))
+    n = len(tips)
+    msg = render(why, n)
+    while len(msg) > MAX_SMS_CHARS and n > MIN_TIPS:
+        n -= 1
+        msg = render(why, n)
+    if len(msg) > MAX_SMS_CHARS and why:
+        w = gsm_safe(why)
+        keep = len(w) - (len(msg) - MAX_SMS_CHARS) - 3
+        msg = render(w[:keep].rstrip() + "..." if keep > 15 else "", n)
+    return msg
+
+
+def build_message(alert: dict, test: bool = False, recipient_area: str | None = None) -> str:
+    """SMS text: where, risk level, why, 3-4 preventive actions, and a pointer to official instructions.
+
+    recipient_area: the person's own registered neighbourhood/ward, used instead of the alert's combined area.
+    """
     city = CITIES[alert["city"]].name if alert["city"] in CITIES else alert["city"]
+    area = _short(recipient_area or alert.get("area_label") or "")
+    place = f"{city} - {area}" if area and area != city else city
+    stop = [TAIL.strip()]
     if alert["source_type"] == DEMO_SOURCE_TYPE:
         # Fixed, self-explanatory text: clearly a demonstration, never an emergency alert.
         return gsm_safe(f"PHOENIX DEMONSTRATION - not an official emergency alert. This is a test message from the "
                         f"PHOENIX flood information prototype ({city}). No action is needed." + TAIL)
-    prec = PRECAUTIONS_SMS[alert["level"]]
-    pre = TEST_PREFIX if test else ""
+    if alert["source_type"] == DEMO_ADVICE_SOURCE_TYPE:
+        # Shows the format of a risk notice with advice, but says plainly that it is only an example.
+        return _compose(["PHOENIX DEMONSTRATION - not an official emergency alert. No action needed.",
+                         f"Example: {place}, ELEVATED risk. {POSSIBLE}"],
+                        "Why (example): heavy rain forecast + mapped flood zone.",
+                        ADVICE_SMS[2], [REMINDER_RISK] + stop)
+    pre = [TEST_PREFIX.strip()] if test else []
+    tips = ADVICE_SMS[alert["level"]]
     if alert["source_type"] == "official_warning":
-        head = f"PHOENIX flood alert ({alert['category']}) {city}: {alert['headline']}."
-        body = f" {prec}"
-    else:
-        head = f"PHOENIX flood risk notice ({alert['category']}) {city} - {alert['area_label']}: {alert['headline']}."
-        body = f" Not an official warning. {prec}"
-    msg = gsm_safe(pre + head + body + TAIL)
-    if len(msg) > MAX_SMS_CHARS:  # shorten the headline, never the safety parts
-        room = MAX_SMS_CHARS - len(gsm_safe(pre + body + TAIL)) - 3
-        msg = gsm_safe(pre + head)[:room].rstrip() + "..." + gsm_safe(body + TAIL)
-    return msg
+        # Relays a warning issued by an authority (named in the headline); PHOENIX is only the messenger.
+        return _compose(pre + [f"PHOENIX flood alert ({alert['category']}) {place}"],
+                        f"OFFICIAL: {alert['headline']}.", tips, [REMINDER_OFFICIAL] + stop)
+    # PHOENIX's own risk assessment (forecast + hazard maps): potential exposure only, never a confirmed flood.
+    return _compose(pre + ["PHOENIX flood risk notice. Not an official warning.",
+                           f"{place}: {alert['category']} risk. {POSSIBLE}"],
+                    f"Why: {alert['headline']}.", tips, [REMINDER_RISK] + stop)
 
 
 def _short_time(iso: str | None) -> str:
@@ -413,7 +469,7 @@ def _require_configured(provider):
 
 
 def _send_one(store, provider, alert, r, test=False) -> str:
-    msg = build_message(alert, test=test)
+    msg = build_message(alert, test=test, recipient_area=r.get("area_label"))
     try:
         res = provider.send(r["phone"], msg)
     except Exception as exc:  # provider crashed: record and continue with others
@@ -493,10 +549,22 @@ def demo_alert(city: str, area_label: str) -> dict:
             "explanation": "Administrator-sent demonstration message. Not based on any warning or forecast."}
 
 
+def demo_advice_alert(city: str, area_label: str) -> dict:
+    """Demonstration of a risk notice WITH preventive advice. Labelled as a demonstration and as an example."""
+    return {"city": city, "area_label": area_label, "level": 2, "category": LEVELS[2],
+            "source": "TEST - PHOENIX demonstration (risk notice with advice)", "source_type": DEMO_ADVICE_SOURCE_TYPE,
+            "event_key": f"test:demo_advice:{city}:{utcnow()}", "headline": "PHOENIX demonstration: risk notice with advice",
+            "precautions": PRECAUTIONS_FULL[2], "is_test": 1,
+            "explanation": "Administrator-sent demonstration message. Example only; not based on any warning or forecast."}
+
+
 def make_test_alert(store: AlertStore, city: str, level: int, area_label: str, official_style: bool,
-                    demonstration: bool = False) -> int:
+                    demonstration: bool = False, advice_demo: bool = False) -> int:
     """Store a sample alert for test mode. Test alerts are never dispatched to groups."""
-    a = demo_alert(city, area_label) if demonstration else sample_alert(city, level, area_label, official_style)
+    if advice_demo:
+        a = demo_advice_alert(city, area_label)
+    else:
+        a = demo_alert(city, area_label) if demonstration else sample_alert(city, level, area_label, official_style)
     aid, _ = upsert_alert(store, a, {})
     return aid
 
